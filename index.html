@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="x-ua-compatible" content="ie=edge">
+	<title>Web Audio Basics</title>
+	<meta name="description" content="Audio basics demo for Web Audio API">
+	<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+	<link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+
+	<button class="control">
+		<span>Play/pause</span>
+	</button><br>
+
+	<button class="get-bpm">
+		<span>Get BPM</span>
+	</button>
+
+	<span id="bpm">0</span>
+
+<script type="text/javascript" src="bufferloader.js"></script>
+<script type="text/javascript" src="bpmdetector.js"></script>
+<script type="text/javascript">
+
+console.clear();
+
+let context;
+let track;
+let sourceNode;
+
+const playButton = document.querySelector('.control');
+const calcButton = document.querySelector('.get-bpm');
+const bpmSpan = document.querySelector('[id="bpm"]');
+
+var bufferLoader;
+
+let paused;
+let pausedAt;
+let startedAt;
+
+playButton.addEventListener('click', function() {
+  	if(!context) {
+		init();
+		return;
+	}
+
+	if (context.state === 'suspended')
+		context.resume();
+
+	if (paused)
+		play();
+	else
+		stop();
+
+}, false);
+
+calcButton.addEventListener('click', function() {
+	getBPM();
+}, false);
+
+function init() {
+	window.AudioContext = window.AudioContext || window.webkitAudioContext;
+	context = new AudioContext();
+
+	bufferLoader = new BufferLoader(
+		context,
+		[ 'Heat Haze Shadow 2nd.weba' ],
+		//[ 'Angelic Angel.weba' ],
+		finishedLoading
+	);
+
+	bufferLoader.load();
+}
+
+function play() {
+    sourceNode = context.createBufferSource();
+    sourceNode.connect(context.destination);
+    sourceNode.buffer = track;
+	paused = false;
+
+    if (pausedAt) {
+        startedAt = Date.now() - pausedAt;
+        sourceNode.start(0, pausedAt / 1000);
+    }
+    else {
+        startedAt = Date.now();
+        sourceNode.start(0);
+    }
+};
+
+function stop() {
+    sourceNode.stop(0);
+    pausedAt = Date.now() - startedAt;
+    paused = true;
+};
+
+function finishedLoading(bufferList) {
+	track = bufferList[0];
+	play();
+}
+
+function getBPM() {
+	sourceNode.disconnect();
+	var offlineContext = new OfflineAudioContext(1, track.length, track.sampleRate);
+	console.log(track.sampleRate);
+	var offlineSource = offlineContext.createBufferSource();
+	offlineSource.buffer = track;
+
+	// Create filter
+	var filter = offlineContext.createBiquadFilter();
+	filter.type = "lowpass";
+
+	offlineSource.connect(filter);
+	filter.connect(offlineContext.destination);
+	offlineSource.connect(offlineContext.destination);
+
+	// Schedule the song to start playing at time:0
+	offlineSource.start(0);
+
+	offlineContext.startRendering().then(function(renderedBuffer) {
+        console.log('Rendering completed successfully');
+        
+        let song = context.createBufferSource();
+        song.buffer = renderedBuffer;
+
+        song.connect(context.destination);
+		song.start();
+
+		var peaks = getPeaksAtThreshold(renderedBuffer.getChannelData(0), 1.5);
+		console.log(peaks);
+		var intervals = countIntervalsBetweenNearbyPeaks(peaks);
+		console.log(intervals);
+		var tempoCounts = groupNeighborsByTempo(intervals);
+		console.log(tempoCounts);
+
+		tempo = tempoCounts.reduce(function(max, current) {
+			return max.count < current.count ? current : max;
+		});
+
+		bpmSpan.textContent = tempo.tempo;
+
+    	}).catch(function(err) {
+        	console.log('Rendering failed: ' + err);
+        	// Note: The promise should reject when startRendering is called a second time on an OfflineAudioContext
+    	});
+}
+
+</script>
+
+</body>
+</html>
